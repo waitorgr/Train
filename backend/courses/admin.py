@@ -12,6 +12,7 @@ from .models import (
     Certificate,
     StudentAnswer,
     StudentSelectedOption,
+    CourseItemProgress,
 )
 
 
@@ -79,3 +80,9 @@ class StudentAnswerAdmin(admin.ModelAdmin):
 @admin.register(StudentSelectedOption)
 class StudentSelectedOptionAdmin(admin.ModelAdmin):
     list_display = ('id', 'student_answer', 'option')
+    
+@admin.register(CourseItemProgress)
+class CourseItemProgressAdmin(admin.ModelAdmin):
+    list_display = ('id', 'student', 'course_item', 'completed_at')
+    list_filter = ('student', 'course_item__course')
+    search_fields = ('student__username', 'course_item__title')

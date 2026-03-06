@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-
+from django.conf import settings
 
 class Course(models.Model):
     title = models.CharField(max_length=200)
@@ -273,3 +273,20 @@ class StudentSelectedOption(models.Model):
 
     def __str__(self):
         return f"{self.student_answer.id} -> {self.option.id}"
+    
+class CourseItemProgress(models.Model):
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='course_item_progress'
+    )
+    course_item = models.ForeignKey(
+        'CourseItem',
+        on_delete=models.CASCADE,
+        related_name='progress_records'
+    )
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('student', 'course_item')
+        

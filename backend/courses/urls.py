@@ -21,6 +21,20 @@ from .views import (
     TestAttemptsByTeacherView,
     MyCertificatesView,
     StudentAnswerCheckView,
+    CourseEnrollmentsView,
+    EnrollmentStatusView,
+    MarkItemCompleteView,
+    CourseProgressView,
+    UploadFileAnswerView,
+    TeacherCourseAttemptsView,
+    CourseItemDeleteView,
+    TextLessonDeleteView,
+    VideoLessonDeleteView,
+    TestDeleteView,
+    CourseItemUpdateView,
+    TextLessonUpdateView,
+    VideoLessonUpdateView,
+    TestUpdateView,
 )
 
 urlpatterns = [
@@ -52,4 +66,23 @@ urlpatterns = [
     path('answers/<int:answer_id>/check/', StudentAnswerCheckView.as_view(), name='answer_check'),
 
     path('certificates/my/', MyCertificatesView.as_view(), name='my_certificates'),
+
+    path('courses/<int:course_id>/enrollments/', CourseEnrollmentsView.as_view(), name='course_enrollments'),
+    path('enrollments/<int:pk>/status/', EnrollmentStatusView.as_view(), name='enrollment_status'),
+
+    path('course-items/<int:item_id>/complete/', MarkItemCompleteView.as_view(), name='mark_item_complete'),
+    path('courses/<int:course_id>/progress/', CourseProgressView.as_view(), name='course_progress'),
+
+    path('answers/upload-file/', UploadFileAnswerView.as_view(), name='upload_file_answer'),
+
+    path('courses/<int:course_id>/attempts/', TeacherCourseAttemptsView.as_view(), name='teacher_course_attempts'),
+    path('course-items/<int:item_id>/delete/', CourseItemDeleteView.as_view(), name='course-item-delete'),
+    path('text-lessons/<int:lesson_id>/delete/', TextLessonDeleteView.as_view(), name='text-lesson-delete'),
+    path('video-lessons/<int:lesson_id>/delete/', VideoLessonDeleteView.as_view(), name='video-lesson-delete'),
+    path('tests/<int:test_id>/delete/', TestDeleteView.as_view(), name='test-delete'),
+    path('course-items/<int:item_id>/update/', CourseItemUpdateView.as_view(), name='course-item-update'),
+    path('text-lessons/<int:lesson_id>/update/', TextLessonUpdateView.as_view(), name='text-lesson-update'),
+    path('video-lessons/<int:lesson_id>/update/', VideoLessonUpdateView.as_view(), name='video-lesson-update'),
+    path('tests/<int:test_id>/update/', TestUpdateView.as_view(), name='test-update'),
 ]
+

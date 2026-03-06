@@ -1,4 +1,4 @@
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, parsers
 from rest_framework.exceptions import PermissionDenied
 from .models import (
     Course,
@@ -598,3 +598,218 @@ class StudentAnswerCheckView(APIView):
             "attempt_total_score": attempt.total_score,
             "attempt_passed": attempt.passed,
         })
+
+class CourseEnrollmentsView(generics.ListAPIView):
+    """Teacher sees all enrollment requests for their course."""
+    serializer_class = EnrollmentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def get_queryset(self):
+        course_id = self.kwargs['course_id']
+        course = get_object_or_404(Course, id=course_id)
+        if course.teacher != self.request.user:
+            raise PermissionDenied("Ви не є викладачем цього курсу.")
+        return Enrollment.objects.filter(course=course).select_related('student').order_by('-enrollment_date')
+
+
+class EnrollmentStatusView(APIView):
+    """Teacher approves or rejects an enrollment."""
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def patch(self, request, pk):
+        enrollment = get_object_or_404(Enrollment, id=pk)
+        if enrollment.course.teacher != request.user:
+            raise PermissionDenied("Ви не є викладачем цього курсу.")
+        new_status = request.data.get('status')
+        if new_status not in ['approved', 'rejected', 'completed']:
+            return Response({'detail': 'Невірний статус. Допустимі: approved, rejected, completed.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        enrollment.status = new_status
+        enrollment.save()
+        return Response(EnrollmentSerializer(enrollment).data)
+
+
+# ── Progress tracking ──────────────────────────────────────────────────────────
+class MarkItemCompleteView(APIView):
+    """Student marks a course item as completed."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, item_id):
+        item = get_object_or_404(CourseItem, id=item_id)
+        if not can_access_course(request.user, item.course):
+            raise PermissionDenied("Немає доступу до цього курсу.")
+        from .models import CourseItemProgress
+        obj, created = CourseItemProgress.objects.get_or_create(
+            student=request.user,
+            course_item=item
+        )
+        return Response({'item_id': item_id, 'completed': True, 'created': created})
+
+
+class CourseProgressView(APIView):
+    """Returns list of completed item ids for a course."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, course_id):
+        from .models import CourseItemProgress
+        completed_ids = list(
+            CourseItemProgress.objects.filter(
+                student=request.user,
+                course_item__course_id=course_id
+            ).values_list('course_item_id', flat=True)
+        )
+        return Response({'completed_item_ids': completed_ids})
+
+
+# ── File answer upload ─────────────────────────────────────────────────────────
+class UploadFileAnswerView(APIView):
+    """Student uploads a file answer for a question."""
+    permission_classes = [permissions.IsAuthenticated, IsStudent]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    @transaction.atomic
+    def post(self, request):
+        question_id = request.data.get('question_id')
+        attempt_id = request.data.get('attempt_id')
+        file = request.FILES.get('file')
+
+        if not all([question_id, attempt_id, file]):
+            return Response({'detail': 'Потрібні question_id, attempt_id та file.'}, status=400)
+
+        question = get_object_or_404(Question, id=question_id)
+        attempt = get_object_or_404(TestAttempt, id=attempt_id, student=request.user)
+
+        answer, _ = StudentAnswer.objects.get_or_create(
+            attempt=attempt,
+            question=question,
+            defaults={'is_checked': False, 'awarded_score': 0}
+        )
+        answer.file_answer = file
+        answer.save()
+        return Response({'answer_id': answer.id, 'file': answer.file_answer.url if answer.file_answer else None})
+
+
+# ── Teacher: get all attempts for their courses ────────────────────────────────
+class TeacherCourseAttemptsView(generics.ListAPIView):
+    """All test attempts across all teacher's courses, with answers."""
+    serializer_class = TestAttemptSerializer
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def get_queryset(self):
+        course_id = self.kwargs.get('course_id')
+        qs = TestAttempt.objects.filter(
+            test__course__teacher=self.request.user
+        ).select_related('student', 'test', 'test__course', 'checked_by') \
+         .prefetch_related('answers__selected_options__option', 'answers__question')
+        if course_id:
+            qs = qs.filter(test__course_id=course_id)
+        return qs.order_by('-completed_at')
+
+
+class CourseItemDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def delete(self, request, item_id):
+        item = get_object_or_404(CourseItem, id=item_id)
+
+        if item.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете видаляти цей розділ.")
+
+        item.delete()
+        return Response({"detail": "Розділ видалено."}, status=204)
+    
+class TextLessonDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def delete(self, request, lesson_id):
+        lesson = get_object_or_404(TextLesson, id=lesson_id)
+
+        if lesson.course_item.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете видаляти цей контент.")
+
+        lesson.delete()
+        return Response({"detail": "Текстовий урок видалено."}, status=204)
+    
+class VideoLessonDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def delete(self, request, lesson_id):
+        lesson = get_object_or_404(VideoLesson, id=lesson_id)
+
+        if lesson.course_item.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете видаляти цей контент.")
+
+        lesson.delete()
+        return Response({"detail": "Відеоурок видалено."}, status=204)
+    
+class TestDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def delete(self, request, test_id):
+        test = get_object_or_404(Test, id=test_id)
+
+        if test.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете видаляти цей тест.")
+
+        test.delete()
+        return Response({"detail": "Тест видалено."}, status=204)
+    
+class CourseItemUpdateView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def patch(self, request, item_id):
+        item = get_object_or_404(CourseItem, id=item_id)
+
+        if item.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете редагувати цей розділ.")
+
+        serializer = CourseItemSerializer(item, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class TextLessonUpdateView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def patch(self, request, lesson_id):
+        lesson = get_object_or_404(TextLesson, id=lesson_id)
+
+        if lesson.course_item.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете редагувати цей урок.")
+
+        serializer = TextLessonSerializer(lesson, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class VideoLessonUpdateView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def patch(self, request, lesson_id):
+        lesson = get_object_or_404(VideoLesson, id=lesson_id)
+
+        if lesson.course_item.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете редагувати цей відеоурок.")
+
+        serializer = VideoLessonSerializer(lesson, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class TestUpdateView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsTeacher]
+
+    def patch(self, request, test_id):
+        test = get_object_or_404(Test, id=test_id)
+
+        if test.course.teacher != request.user:
+            raise PermissionDenied("Ви не можете редагувати цей тест.")
+
+        serializer = TestSerializer(test, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
